@@ -973,6 +973,65 @@ func Test_ServiceClusterIPSelector(t *testing.T) {
 	}
 }
 
+func Test_ServicePatchAddPort(t *testing.T) {
+	server := kubeapiservertesting.StartTestServerOrDie(t, nil, framework.DefaultTestServerFlags(), framework.SharedEtcd())
+	defer server.TearDownFn()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := clientset.NewForConfig(server.ClientConfig)
+	if err != nil {
+		t.Fatalf("Error creating clientset: %v", err)
+	}
+
+	ns := framework.CreateNamespaceOrDie(client, "test-service-patch-add-port", t)
+	defer framework.DeleteNamespaceOrDie(client, ns, t)
+
+	// create a service with tcp protocol port
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-service-" + utilrand.String(5),
+		},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
+			Ports: []corev1.ServicePort{{
+				Name:       "tcp-port",
+				Port:       int32(80),
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt32(80),
+			}},
+		},
+	}
+
+	_, err = client.CoreV1().Services(ns.Name).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Error creating test service: %v", err)
+	}
+
+	// patch the service to add a port(same port number but different protocol)
+	patch := []byte(`{"spec":{"ports":[{"name":"tcp-80","protocol":"TCP","port":80,"targetPort":80},{"name":"udp-80","protocol":"UDP","port":80,"targetPort":80}]}}`)
+	_, err = client.CoreV1().Services(ns.Name).Patch(ctx, service.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		t.Fatalf("Error patching test service: %v", err)
+	}
+
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		patchedSvc, err := client.CoreV1().Services(ns.Name).Get(ctx, service.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if len(patchedSvc.Spec.Ports) != 2 {
+			return fmt.Errorf("expected 2 ports, got %d", len(patchedSvc.Spec.Ports))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error waiting for test service to have 2 ports: %v", err)
+	}
+}
+
 // Repro https://github.com/kubernetes/kubernetes/issues/123853
 func Test_ServiceWatchUntil(t *testing.T) {
 	svcReadyTimeout := 30 * time.Second

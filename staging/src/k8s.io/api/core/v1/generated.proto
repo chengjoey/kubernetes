@@ -5929,8 +5929,6 @@ message ServiceProxyOptions {
 message ServiceSpec {
   // The list of ports that are exposed by this service.
   // More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies
-  // +patchMergeKey=port
-  // +patchStrategy=merge
   // +listType=map
   // +listMapKey=port
   // +listMapKey=protocol
